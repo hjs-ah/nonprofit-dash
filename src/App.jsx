@@ -1,11 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { NOTION_TOKEN, DB } from "./config.js";
 import {
-  testConnection, loadOrgProfile, saveOrgField,
+  ping, loadOrg, saveOrgField,
   loadChecklist, saveChecklistItem,
   loadAssets, saveAsset, deleteAsset,
-  loadWeeklyLog, saveWeeklyEntry,
-} from "./notion.js";
+  loadWeekly, saveWeekly,
+} from "./api.js";
 
 // ─────────────────────────────────────────────
 // STATIC DATA
@@ -46,7 +45,7 @@ const PHASES = [
     { l: "Pay.gov", u: "https://www.pay.gov" },
   ]},
   { id: 4, title: "State & Local Compliance", tasks: [
-    { t: "Apply for state income tax exemption", n: "Most states auto-recognize after federal approval — verify with your state" },
+    { t: "Apply for state income tax exemption", n: "Most states auto-recognize after federal approval" },
     { t: "Register for state sales tax exemption" },
     { t: "Register to solicit charitable donations in your state" },
     { t: "Register in other states where you will fundraise" },
@@ -113,7 +112,7 @@ const IMPACT_SECTIONS = [
 const METRICS = ["People served (unduplicated)", "Volunteer hours contributed", "Programs offered & participants", "Geographic reach (zip codes, counties)", "Grants received & grant-to-program ratio", "Donor retention rate year-over-year", "Program cost per person served", "Staff and board diversity metrics"];
 
 const FINANCIALS = {
-  budget: [{ category: "Personnel (salaries, benefits)", amount: 120000 }, { category: "Program delivery costs", amount: 85000 }, { category: "Occupancy (rent, utilities)", amount: 24000 }, { category: "Technology & software", amount: 8500 }, { category: "Marketing & communications", amount: 12000 }, { category: "Professional services (legal, CPA)", amount: 15000 }, { category: "Insurance", amount: 6500 }, { category: "Miscellaneous / contingency", amount: 9000 }],
+  budget: [{ category: "Personnel (salaries, benefits)", amount: 120000 }, { category: "Program delivery costs", amount: 85000 }, { category: "Occupancy (rent, utilities)", amount: 24000 }, { category: "Technology & software", amount: 8500 }, { category: "Marketing & communications", amount: 12000 }, { category: "Professional services", amount: 15000 }, { category: "Insurance", amount: 6500 }, { category: "Miscellaneous / contingency", amount: 9000 }],
   revenue: [{ category: "Individual donations", amount: 95000 }, { category: "Foundation grants", amount: 110000 }, { category: "Government grants", amount: 45000 }, { category: "Events & fundraising", amount: 28000 }, { category: "Earned income / fees", amount: 12000 }],
   timeline: [{ month: "Month 1–2", milestone: "Open bank account, set up accounting software, hire bookkeeper" }, { month: "Month 3", milestone: "Finalize Year 1 budget, board adopts financial controls policy" }, { month: "Month 4", milestone: "Submit first grant applications, launch initial fundraising campaign" }, { month: "Month 6", milestone: "Mid-year financial review with board treasurer, update projections" }, { month: "Month 9", milestone: "Begin Year 2 budget planning, assess reserve fund status" }, { month: "Month 12", milestone: "Year-end close, prepare financial statements for Form 990" }, { month: "Month 14–15", milestone: "File Form 990 (due 4.5 months after fiscal year end)" }, { month: "Ongoing", milestone: "Monthly reconciliation, quarterly treasurer reports to board" }],
   documents: [{ name: "Form 1023 / 1023-EZ", desc: "IRS application for tax-exempt status", status: "Required" }, { name: "Form 990 (annual)", desc: "Annual information return; public record", status: "Required" }, { name: "Audited Financial Statements", desc: "Required by many funders at $500K+ revenue", status: "Recommended" }, { name: "IRS Form W-9", desc: "Provided to grantors; confirms EIN and exempt status", status: "Required" }, { name: "Gift Acknowledgment Letters", desc: "Written receipt for donations $250+", status: "Required" }, { name: "Chart of Accounts", desc: "Foundation of your fund accounting system", status: "Required" }, { name: "Financial Controls Policy", desc: "Documents dual-signature rules, expense approvals", status: "Required" }, { name: "Investment Policy Statement", desc: "Guides management of reserve/endowment funds", status: "Recommended" }, { name: "State Charitable Registration", desc: "Annual registration to solicit donations in each state", status: "Required" }, { name: "1099-NEC Forms", desc: "Issued to contractors paid $600+ in a year", status: "Required" }],
@@ -133,100 +132,71 @@ const NAV_ITEMS = [
 ];
 
 // ─────────────────────────────────────────────
-// TOKENS
+// DESIGN TOKENS
 // ─────────────────────────────────────────────
-const TAG_LIGHT = { Legal: { bg: "#dbeafe", text: "#1d4ed8" }, Financial: { bg: "#dcfce7", text: "#15803d" }, Government: { bg: "#fee2e2", text: "#b91c1c" }, "Tools & Software": { bg: "#ede9fe", text: "#6d28d9" }, Templates: { bg: "#fef9c3", text: "#92400e" }, Reference: { bg: "#f3f4f6", text: "#374151" }, Other: { bg: "#f3f4f6", text: "#374151" }, Required: { bg: "#fee2e2", text: "#b91c1c" }, Recommended: { bg: "#dcfce7", text: "#15803d" }, "Foundation & Governance": { bg: "#dbeafe", text: "#1d4ed8" }, "Legal Incorporation": { bg: "#fef9c3", text: "#92400e" }, "IRS Application": { bg: "#fee2e2", text: "#b91c1c" }, "State Compliance": { bg: "#dcfce7", text: "#15803d" }, "Banking & Financials": { bg: "#ede9fe", text: "#6d28d9" }, Operations: { bg: "#f3f4f6", text: "#374151" }, "Ongoing Compliance": { bg: "#f0fdf4", text: "#166534" }, Multiple: { bg: "#fce7f3", text: "#9d174d" } };
-const TAG_DARK = { Legal: { bg: "rgba(37,99,235,0.15)", text: "#93c5fd" }, Financial: { bg: "rgba(22,163,74,0.15)", text: "#86efac" }, Government: { bg: "rgba(220,38,38,0.15)", text: "#fca5a5" }, "Tools & Software": { bg: "rgba(124,58,237,0.15)", text: "#c4b5fd" }, Templates: { bg: "rgba(180,83,9,0.15)", text: "#fcd34d" }, Reference: { bg: "rgba(255,255,255,0.08)", text: "rgba(255,255,255,0.5)" }, Other: { bg: "rgba(255,255,255,0.08)", text: "rgba(255,255,255,0.5)" }, Required: { bg: "rgba(220,38,38,0.15)", text: "#fca5a5" }, Recommended: { bg: "rgba(22,163,74,0.15)", text: "#86efac" }, "Foundation & Governance": { bg: "rgba(37,99,235,0.15)", text: "#93c5fd" }, "Legal Incorporation": { bg: "rgba(180,83,9,0.15)", text: "#fcd34d" }, "IRS Application": { bg: "rgba(220,38,38,0.15)", text: "#fca5a5" }, "State Compliance": { bg: "rgba(22,163,74,0.15)", text: "#86efac" }, "Banking & Financials": { bg: "rgba(124,58,237,0.15)", text: "#c4b5fd" }, Operations: { bg: "rgba(255,255,255,0.08)", text: "rgba(255,255,255,0.5)" }, "Ongoing Compliance": { bg: "rgba(22,163,74,0.12)", text: "#86efac" }, Multiple: { bg: "rgba(157,23,77,0.15)", text: "#f9a8d4" } };
+const TAG_LIGHT = { Legal:{bg:"#dbeafe",text:"#1d4ed8"}, Financial:{bg:"#dcfce7",text:"#15803d"}, Government:{bg:"#fee2e2",text:"#b91c1c"}, "Tools & Software":{bg:"#ede9fe",text:"#6d28d9"}, Templates:{bg:"#fef9c3",text:"#92400e"}, Reference:{bg:"#f3f4f6",text:"#374151"}, Other:{bg:"#f3f4f6",text:"#374151"}, Required:{bg:"#fee2e2",text:"#b91c1c"}, Recommended:{bg:"#dcfce7",text:"#15803d"}, "Foundation & Governance":{bg:"#dbeafe",text:"#1d4ed8"}, "Legal Incorporation":{bg:"#fef9c3",text:"#92400e"}, "IRS Application":{bg:"#fee2e2",text:"#b91c1c"}, "State Compliance":{bg:"#dcfce7",text:"#15803d"}, "Banking & Financials":{bg:"#ede9fe",text:"#6d28d9"}, Operations:{bg:"#f3f4f6",text:"#374151"}, "Ongoing Compliance":{bg:"#f0fdf4",text:"#166534"}, Multiple:{bg:"#fce7f3",text:"#9d174d"} };
+const TAG_DARK  = { Legal:{bg:"rgba(37,99,235,0.15)",text:"#93c5fd"}, Financial:{bg:"rgba(22,163,74,0.15)",text:"#86efac"}, Government:{bg:"rgba(220,38,38,0.15)",text:"#fca5a5"}, "Tools & Software":{bg:"rgba(124,58,237,0.15)",text:"#c4b5fd"}, Templates:{bg:"rgba(180,83,9,0.15)",text:"#fcd34d"}, Reference:{bg:"rgba(255,255,255,0.08)",text:"rgba(255,255,255,0.5)"}, Other:{bg:"rgba(255,255,255,0.08)",text:"rgba(255,255,255,0.5)"}, Required:{bg:"rgba(220,38,38,0.15)",text:"#fca5a5"}, Recommended:{bg:"rgba(22,163,74,0.15)",text:"#86efac"}, "Foundation & Governance":{bg:"rgba(37,99,235,0.15)",text:"#93c5fd"}, "Legal Incorporation":{bg:"rgba(180,83,9,0.15)",text:"#fcd34d"}, "IRS Application":{bg:"rgba(220,38,38,0.15)",text:"#fca5a5"}, "State Compliance":{bg:"rgba(22,163,74,0.15)",text:"#86efac"}, "Banking & Financials":{bg:"rgba(124,58,237,0.15)",text:"#c4b5fd"}, Operations:{bg:"rgba(255,255,255,0.08)",text:"rgba(255,255,255,0.5)"}, "Ongoing Compliance":{bg:"rgba(22,163,74,0.12)",text:"#86efac"}, Multiple:{bg:"rgba(157,23,77,0.15)",text:"#f9a8d4"} };
 
-function buildTokens(dark) {
+function buildT(dark) {
   return dark ? {
-    bg: "#0f0f0d", surface: "#18181b", surface2: "#1e1e22", border: "rgba(255,255,255,0.08)", border2: "rgba(255,255,255,0.14)",
-    text: "#f4f4f5", muted: "rgba(244,244,245,0.5)", muted2: "rgba(244,244,245,0.3)",
-    accent: "#6ea8fe", accentBg: "rgba(110,168,254,0.1)", accentBorder: "rgba(110,168,254,0.3)",
-    green: "#4ade80", greenBg: "rgba(74,222,128,0.1)", red: "#f87171",
-    progTrack: "rgba(255,255,255,0.08)", progFill: "#6ea8fe", sidebarBg: "#111113", inputBg: "rgba(255,255,255,0.04)",
+    bg:"#0f0f0d", surface:"#18181b", surface2:"#1e1e22", border:"rgba(255,255,255,0.08)", border2:"rgba(255,255,255,0.14)",
+    text:"#f4f4f5", muted:"rgba(244,244,245,0.5)", muted2:"rgba(244,244,245,0.3)",
+    accent:"#6ea8fe", accentBg:"rgba(110,168,254,0.1)", accentBorder:"rgba(110,168,254,0.3)",
+    green:"#4ade80", greenBg:"rgba(74,222,128,0.1)", red:"#f87171",
+    progTrack:"rgba(255,255,255,0.08)", progFill:"#6ea8fe", sidebarBg:"#111113", inputBg:"rgba(255,255,255,0.04)",
   } : {
-    bg: "#f8f7f4", surface: "#ffffff", surface2: "#f1f0ec", border: "rgba(0,0,0,0.09)", border2: "rgba(0,0,0,0.16)",
-    text: "#1c1b18", muted: "#78756e", muted2: "#a09d96",
-    accent: "#2563eb", accentBg: "rgba(37,99,235,0.07)", accentBorder: "rgba(37,99,235,0.22)",
-    green: "#16a34a", greenBg: "rgba(22,163,74,0.08)", red: "#dc2626",
-    progTrack: "rgba(0,0,0,0.08)", progFill: "#2563eb", sidebarBg: "#ffffff", inputBg: "#f1f0ec",
+    bg:"#f8f7f4", surface:"#ffffff", surface2:"#f1f0ec", border:"rgba(0,0,0,0.09)", border2:"rgba(0,0,0,0.16)",
+    text:"#1c1b18", muted:"#78756e", muted2:"#a09d96",
+    accent:"#2563eb", accentBg:"rgba(37,99,235,0.07)", accentBorder:"rgba(37,99,235,0.22)",
+    green:"#16a34a", greenBg:"rgba(22,163,74,0.08)", red:"#dc2626",
+    progTrack:"rgba(0,0,0,0.08)", progFill:"#2563eb", sidebarBg:"#ffffff", inputBg:"#f1f0ec",
   };
 }
 
 function fmtCurrency(n) { return "$" + n.toLocaleString(); }
 
 function useIsMobile() {
-  const [mobile, setMobile] = useState(window.innerWidth < 768);
+  const [mob, setMob] = useState(window.innerWidth < 768);
   useEffect(() => {
-    const fn = () => setMobile(window.innerWidth < 768);
+    const fn = () => setMob(window.innerWidth < 768);
     window.addEventListener("resize", fn);
     return () => window.removeEventListener("resize", fn);
   }, []);
-  return mobile;
+  return mob;
 }
 
 // ─────────────────────────────────────────────
-// SETUP SCREEN  (shown when token is missing)
+// SAVE BADGE
 // ─────────────────────────────────────────────
-function SetupScreen({ onDone }) {
-  const [token, setToken] = useState(NOTION_TOKEN || "");
-  const [testing, setTesting] = useState(false);
-  const [error, setError] = useState("");
+function SaveBadge({ status }) {
+  if (status === "idle") return null;
+  const s = { saving:{bg:"rgba(37,99,235,0.08)",text:"#2563eb",label:"Saving to Notion…"}, saved:{bg:"rgba(22,163,74,0.08)",text:"#16a34a",label:"Saved ✓"}, error:{bg:"rgba(220,38,38,0.08)",text:"#dc2626",label:"Save failed — check NOTION_TOKEN in Vercel"} }[status];
+  return <div style={{position:"fixed",top:14,right:16,zIndex:999,padding:"6px 14px",borderRadius:100,background:s.bg,color:s.text,fontSize:12,fontWeight:500,fontFamily:"'DM Sans',sans-serif",border:`1px solid ${s.text}22`}}>{s.label}</div>;
+}
 
-  const handleTest = async () => {
-    setTesting(true); setError("");
-    try {
-      const ok = await testConnection(token);
-      if (ok) onDone(token);
-      else setError("Connection failed. Double-check the token and make sure you shared the databases with your integration.");
-    } catch (e) {
-      setError("Connection failed: " + e.message);
-    }
-    setTesting(false);
-  };
-
+// ─────────────────────────────────────────────
+// NOT CONFIGURED SCREEN
+// ─────────────────────────────────────────────
+function NotConfigured() {
   return (
-    <div style={{ minHeight: "100vh", background: "#f8f7f4", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'DM Sans', sans-serif" }}>
-      <div style={{ width: "100%", maxWidth: 520, background: "#fff", border: "1px solid rgba(0,0,0,0.09)", borderRadius: 16, padding: "36px 32px" }}>
-        <div style={{ fontSize: 22, fontWeight: 600, color: "#1c1b18", marginBottom: 6, letterSpacing: "-0.02em" }}>Connect to Notion</div>
-        <div style={{ fontSize: 13.5, color: "#78756e", marginBottom: 28, lineHeight: 1.65 }}>
-          This dashboard saves everything to your Notion workspace. Complete these steps once to get started.
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{minHeight:"100vh",background:"#f8f7f4",display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{maxWidth:520,background:"#fff",border:"1px solid rgba(0,0,0,0.09)",borderRadius:16,padding:"36px 32px"}}>
+        <div style={{fontSize:22,fontWeight:600,color:"#1c1b18",marginBottom:8,letterSpacing:"-0.02em"}}>Notion token not configured</div>
+        <p style={{fontSize:13.5,color:"#78756e",lineHeight:1.7,marginBottom:20}}>The dashboard can't reach Notion because <code>NOTION_TOKEN</code> is missing from your Vercel environment variables.</p>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {[
-            { step: "1", title: "Create a Notion integration", body: <>Go to <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>notion.so/my-integrations</a> → click <strong>+ New integration</strong> → name it <em>501c3 Dashboard</em> → click Save → copy the <strong>Internal Integration Secret</strong>.</> },
-            { step: "2", title: "Share your databases with the integration", body: <>In Notion, open each of these databases and go to <strong>… → Connections → add your integration</strong>: Checklist Progress, Organization Profile, Assets & Links, Weekly Activity Log, and Board Meeting Notes.</> },
-            { step: "3", title: "Paste your integration token below", body: null },
-          ].map(({ step, title, body }) => (
-            <div key={step} style={{ display: "flex", gap: 14 }}>
-              <div style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: "#2563eb", flexShrink: 0, marginTop: 1 }}>{step}</div>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 500, color: "#1c1b18", marginBottom: body ? 5 : 0 }}>{title}</div>
-                {body && <div style={{ fontSize: 13, color: "#78756e", lineHeight: 1.65 }}>{body}</div>}
-                {step === "3" && (
-                  <input
-                    type="password"
-                    placeholder="ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                    value={token}
-                    onChange={e => setToken(e.target.value)}
-                    style={{ marginTop: 10, width: "100%", background: "#f1f0ec", border: "1px solid rgba(0,0,0,0.09)", borderRadius: 7, padding: "9px 12px", fontSize: 13, fontFamily: "'DM Sans', sans-serif", color: "#1c1b18", outline: "none" }}
-                  />
-                )}
-              </div>
+            ["1", "Go to your Vercel project", <span>Open <a href="https://vercel.com" target="_blank" rel="noreferrer" style={{color:"#2563eb"}}>vercel.com</a> → your project → Settings → Environment Variables</span>],
+            ["2", "Add the variable", <span>Name: <code>NOTION_TOKEN</code> &nbsp; Value: your integration secret (starts with <code>ntn_</code>)</span>],
+            ["3", "Redeploy", "Vercel → Deployments → click the three dots on the latest deployment → Redeploy"],
+          ].map(([step, title, body]) => (
+            <div key={step} style={{display:"flex",gap:12}}>
+              <div style={{width:24,height:24,borderRadius:"50%",background:"rgba(37,99,235,0.08)",border:"1px solid rgba(37,99,235,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:600,color:"#2563eb",flexShrink:0,marginTop:2}}>{step}</div>
+              <div><div style={{fontSize:13.5,fontWeight:500,color:"#1c1b18",marginBottom:3}}>{title}</div><div style={{fontSize:13,color:"#78756e",lineHeight:1.65}}>{body}</div></div>
             </div>
           ))}
         </div>
-
-        {error && <div style={{ marginTop: 16, padding: "10px 14px", background: "#fee2e2", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, fontSize: 13, color: "#b91c1c" }}>{error}</div>}
-
-        <button onClick={handleTest} disabled={!token.trim() || testing} style={{ marginTop: 24, width: "100%", padding: "11px", borderRadius: 8, border: "none", background: token.trim() ? "#2563eb" : "#d1d5db", color: "#fff", fontSize: 14, fontWeight: 500, cursor: token.trim() ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif" }}>
-          {testing ? "Testing connection…" : "→ Connect and open dashboard"}
-        </button>
-
-        <div style={{ marginTop: 14, fontSize: 12, color: "#a09d96", textAlign: "center", lineHeight: 1.6 }}>
-          Your token is stored only in this browser session and in <code>src/config.js</code>.<br />It never leaves your device except to talk directly to Notion's API.
+        <div style={{marginTop:24,padding:"12px 16px",background:"#f1f0ec",borderRadius:8,fontSize:12.5,color:"#78756e",lineHeight:1.6}}>
+          The token lives only in Vercel's encrypted environment. It is never sent to the browser or stored in your source code.
         </div>
       </div>
     </div>
@@ -234,102 +204,83 @@ function SetupScreen({ onDone }) {
 }
 
 // ─────────────────────────────────────────────
-// SAVE INDICATOR
-// ─────────────────────────────────────────────
-function SaveBadge({ status }) {
-  if (status === "idle") return null;
-  const styles = {
-    saving: { bg: "rgba(37,99,235,0.08)", text: "#2563eb", label: "Saving to Notion…" },
-    saved:  { bg: "rgba(22,163,74,0.08)", text: "#16a34a", label: "Saved to Notion ✓" },
-    error:  { bg: "rgba(220,38,38,0.08)", text: "#dc2626", label: "Save failed — check token" },
-  }[status];
-  return (
-    <div style={{ position: "fixed", top: 14, right: 16, zIndex: 999, padding: "6px 14px", borderRadius: 100, background: styles.bg, color: styles.text, fontSize: 12, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", border: `1px solid ${styles.text}22`, transition: "all 0.2s" }}>
-      {styles.label}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// MAIN APP
+// APP
 // ─────────────────────────────────────────────
 export default function App() {
-  const [token, setToken] = useState(NOTION_TOKEN || "");
-  const [connected, setConnected] = useState(!!NOTION_TOKEN);
   const [dark, setDark] = useState(false);
-  const T = buildTokens(dark);
+  const T = buildT(dark);
   const tags = dark ? TAG_DARK : TAG_LIGHT;
   const isMobile = useIsMobile();
 
+  const [status, setStatus]         = useState("checking"); // checking | ok | no-token | error
   const [saveStatus, setSaveStatus] = useState("idle");
-  const [loading, setLoading] = useState(true);
-  const [activeNav, setActiveNav] = useState("overview");
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [activeNav, setActiveNav]   = useState("overview");
+  const [moreOpen, setMoreOpen]     = useState(false);
 
-  // Data state
-  const [orgProfile, setOrgProfile] = useState({});
-  const [orgFields, setOrgFields] = useState({ name: "", state: "", ein: "", fiscalYear: "", vision: "", mission: "" });
-  const [checklist, setChecklist] = useState({});
-  const [checks, setChecks] = useState({});
-  const [assets, setAssets] = useState([]);
+  // Data
+  const [orgProfile, setOrgProfile]   = useState({});
+  const [orgFields, setOrgFields]     = useState({ name:"", state:"", ein:"", fiscalYear:"", vision:"", mission:"" });
+  const [checklist, setChecklist]     = useState({});
+  const [checks, setChecks]           = useState({});
+  const [assets, setAssets]           = useState([]);
   const [weekEntries, setWeekEntries] = useState([]);
 
-  // UI state
-  const [expandedPhase, setExpandedPhase] = useState(null);
+  // UI
+  const [expandedPhase, setExpandedPhase]     = useState(null);
   const [expandedConsider, setExpandedConsider] = useState(null);
-  const [expandedWeek, setExpandedWeek] = useState(null);
-  const [activeFinTab, setActiveFinTab] = useState("budget");
-  const [impactPdf, setImpactPdf] = useState(null);
+  const [expandedWeek, setExpandedWeek]       = useState(null);
+  const [activeFinTab, setActiveFinTab]       = useState("budget");
+  const [impactPdf, setImpactPdf]             = useState(null);
   const pdfRef = useRef();
 
   // Asset form
-  const [aTitle, setATitle] = useState(""); const [aUrl, setAUrl] = useState("");
-  const [aCat, setACat] = useState("Reference"); const [aDesc, setADesc] = useState("");
-
+  const [aTitle,setATitle]=useState(""); const [aUrl,setAUrl]=useState(""); const [aCat,setACat]=useState("Reference"); const [aDesc,setADesc]=useState("");
   // Weekly form
-  const [wLabel, setWLabel] = useState(""); const [wPhase, setWPhase] = useState("Foundation & Governance");
-  const [wSummary, setWSummary] = useState(""); const [wDone, setWDone] = useState("");
-  const [wWip, setWWip] = useState(""); const [wBlockers, setWBlockers] = useState(""); const [wNext, setWNext] = useState("");
+  const [wLabel,setWLabel]=useState(""); const [wPhase,setWPhase]=useState("Foundation & Governance");
+  const [wSummary,setWSummary]=useState(""); const [wDone,setWDone]=useState(""); const [wWip,setWWip]=useState(""); const [wBlockers,setWBlockers]=useState(""); const [wNext,setWNext]=useState("");
 
-  // ── Load all data from Notion
+  // ── Check server connectivity on mount
   useEffect(() => {
-    if (!connected || !token) return;
-    async function loadAll() {
-      setLoading(true);
-      try {
-        const [profile, cl, assetList, weekList] = await Promise.all([
-          loadOrgProfile(token, DB.ORG_PROFILE),
-          loadChecklist(token, DB.CHECKLIST),
-          loadAssets(token, DB.ASSETS),
-          loadWeeklyLog(token, DB.WEEKLY_LOG),
-        ]);
-        setOrgProfile(profile);
+    ping()
+      .then(() => setStatus("ok"))
+      .catch(e => {
+        if (e.message.includes("401") || e.message.includes("token") || e.message.includes("500")) {
+          setStatus("no-token");
+        } else {
+          setStatus("error");
+        }
+      });
+  }, []);
+
+  // ── Load data once ping succeeds
+  useEffect(() => {
+    if (status !== "ok") return;
+    setLoading(true);
+    Promise.all([loadOrg(), loadChecklist(), loadAssets(), loadWeekly()])
+      .then(([org, cl, assetList, weekList]) => {
+        setOrgProfile(org);
         setOrgFields({
-          name: profile["Organization Name"]?.value || "",
-          state: profile["State of Incorporation"]?.value || "",
-          ein: profile["EIN"]?.value || "",
-          fiscalYear: profile["Fiscal Year End"]?.value || "",
-          vision: profile["Vision"]?.value || "",
-          mission: profile["Mission"]?.value || "",
+          name:       org["Organization Name"]?.value || "",
+          state:      org["State of Incorporation"]?.value || "",
+          ein:        org["EIN"]?.value || "",
+          fiscalYear: org["Fiscal Year End"]?.value || "",
+          vision:     org["Vision"]?.value || "",
+          mission:    org["Mission"]?.value || "",
         });
         setChecklist(cl);
-        const checkState = {};
-        for (const [key, val] of Object.entries(cl)) {
-          checkState[key] = val.completed;
-        }
-        setChecks(checkState);
+        const ck = {};
+        Object.entries(cl).forEach(([k, v]) => { ck[k] = v.completed; });
+        setChecks(ck);
         setAssets(assetList);
         setWeekEntries(weekList);
         if (weekList.length > 0) setExpandedWeek(0);
-      } catch (e) {
-        console.error("Load error:", e);
-      }
-      setLoading(false);
-    }
-    loadAll();
-  }, [connected, token]);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [status]);
 
-  // ── Save helpers with status indicator
+  // ── Save wrapper
   const withSave = useCallback(async (fn) => {
     setSaveStatus("saving");
     try {
@@ -337,19 +288,25 @@ export default function App() {
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2500);
     } catch (e) {
-      console.error("Save error:", e);
+      console.error(e);
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 4000);
     }
   }, []);
 
-  // ── Org field save (debounced — saves 1.2s after last keystroke)
+  // ── Org field debounce
   const saveTimers = useRef({});
   const handleOrgField = (field, notionKey, value) => {
     setOrgFields(prev => ({ ...prev, [field]: value }));
     clearTimeout(saveTimers.current[field]);
     saveTimers.current[field] = setTimeout(() => {
-      withSave(() => saveOrgField(token, DB.ORG_PROFILE, orgProfile, notionKey, value));
+      const pageId = orgProfile[notionKey]?.pageId || null;
+      withSave(async () => {
+        const res = await saveOrgField(notionKey, value, pageId);
+        if (!pageId && res.pageId) {
+          setOrgProfile(prev => ({ ...prev, [notionKey]: { value, pageId: res.pageId } }));
+        }
+      });
     }, 1200);
   };
 
@@ -359,156 +316,163 @@ export default function App() {
     const newVal = !checks[key];
     setChecks(prev => ({ ...prev, [key]: newVal }));
     const phase = PHASES.find(p => p.id === phaseId);
-    const task = phase?.tasks[ti];
-    await withSave(() =>
-      saveChecklistItem(token, DB.CHECKLIST, checklist, phaseId, ti, task?.t || "", phase?.title || "", newVal)
-    );
-    setChecklist(prev => ({
-      ...prev,
-      [key]: { ...prev[key], completed: newVal },
-    }));
+    const pageId = checklist[key]?.pageId || null;
+    withSave(async () => {
+      const res = await saveChecklistItem(phaseId, ti, phase?.tasks[ti]?.t || "", phase?.title || "", newVal, pageId);
+      if (!pageId && res.pageId) {
+        setChecklist(prev => ({ ...prev, [key]: { completed: newVal, pageId: res.pageId } }));
+      } else {
+        setChecklist(prev => ({ ...prev, [key]: { ...prev[key], completed: newVal } }));
+      }
+    });
   };
 
   // ── Assets
   const handleAddAsset = async () => {
     if (!aTitle.trim() || !aUrl.trim()) return;
     const asset = { title: aTitle.trim(), url: aUrl.trim(), category: aCat, desc: aDesc.trim() };
-    await withSave(async () => {
-      const page = await saveAsset(token, DB.ASSETS, asset);
-      setAssets(prev => [{ ...asset, pageId: page.id }, ...prev]);
-    });
     setATitle(""); setAUrl(""); setADesc(""); setACat("Reference");
+    withSave(async () => {
+      const res = await saveAsset(asset);
+      setAssets(prev => [{ ...asset, pageId: res.pageId }, ...prev]);
+    });
   };
-
   const handleDeleteAsset = async (i) => {
-    const asset = assets[i];
+    const { pageId } = assets[i];
     setAssets(prev => prev.filter((_, idx) => idx !== i));
-    if (asset.pageId) {
-      await withSave(() => deleteAsset(token, asset.pageId));
-    }
+    if (pageId) withSave(() => deleteAsset(pageId));
   };
 
-  // ── Weekly log
+  // ── Weekly
   const handleAddWeek = async () => {
     if (!wLabel.trim()) return;
     const entry = { label: wLabel, phase: wPhase, summary: wSummary, done: wDone, wip: wWip, blockers: wBlockers, next: wNext };
-    await withSave(async () => {
-      const page = await saveWeeklyEntry(token, DB.WEEKLY_LOG, entry);
-      setWeekEntries(prev => [{ ...entry, pageId: page.id }, ...prev]);
+    setWLabel(""); setWSummary(""); setWDone(""); setWWip(""); setWBlockers(""); setWNext("");
+    withSave(async () => {
+      const res = await saveWeekly(entry);
+      setWeekEntries(prev => [{ ...entry, pageId: res.pageId }, ...prev]);
       setExpandedWeek(0);
     });
-    setWLabel(""); setWSummary(""); setWDone(""); setWWip(""); setWBlockers(""); setWNext("");
   };
 
-  const totalTasks = PHASES.reduce((a, p) => a + p.tasks.length, 0);
-  const doneTasks = Object.values(checks).filter(Boolean).length;
-  const pct = Math.round((doneTasks / totalTasks) * 100);
-  const phasesDone = PHASES.filter(p => p.tasks.every((_, ti) => checks[`${p.id}-${ti}`])).length;
-  const totalRevenue = FINANCIALS.revenue.reduce((a, r) => a + r.amount, 0);
+  const totalTasks   = PHASES.reduce((a, p) => a + p.tasks.length, 0);
+  const doneTasks    = Object.values(checks).filter(Boolean).length;
+  const pct          = Math.round((doneTasks / totalTasks) * 100);
+  const phasesDone   = PHASES.filter(p => p.tasks.every((_, ti) => checks[`${p.id}-${ti}`])).length;
+  const totalRevenue  = FINANCIALS.revenue.reduce((a, r) => a + r.amount, 0);
   const totalExpenses = FINANCIALS.budget.reduce((a, r) => a + r.amount, 0);
-  const surplus = totalRevenue - totalExpenses;
+  const surplus       = totalRevenue - totalExpenses;
 
   // ── Style helpers
-  const card = (extra = {}) => ({ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 10, ...extra });
-  const lbl = { fontSize: 10.5, color: T.muted2, textTransform: "uppercase", letterSpacing: "0.09em", fontWeight: 500, display: "block", marginBottom: 5 };
-  const inp = (extra = {}) => ({ background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 7, padding: "8px 11px", color: T.text, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none", width: "100%", ...extra });
-  const ta = (extra = {}) => ({ ...inp(), resize: "vertical", minHeight: 68, lineHeight: 1.55, ...extra });
-  const tag = (k) => ({ display: "inline-block", fontSize: 11, padding: "2px 9px", borderRadius: 100, fontWeight: 500, background: (tags[k] || tags["Other"]).bg, color: (tags[k] || tags["Other"]).text, whiteSpace: "nowrap" });
-  const primaryBtn = { padding: "9px 18px", borderRadius: 7, border: "none", background: T.accent, color: "#fff", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: 500 };
-  const ghostBtn = { padding: "8px 14px", borderRadius: 7, border: `1px solid ${T.border2}`, background: T.surface2, color: T.text, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" };
+  const card = (x={}) => ({ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"16px 18px", marginBottom:10, ...x });
+  const lbl  = { fontSize:10.5, color:T.muted2, textTransform:"uppercase", letterSpacing:"0.09em", fontWeight:500, display:"block", marginBottom:5 };
+  const inp  = (x={}) => ({ background:T.inputBg, border:`1px solid ${T.border}`, borderRadius:7, padding:"8px 11px", color:T.text, fontSize:13, fontFamily:"'DM Sans',sans-serif", outline:"none", width:"100%", ...x });
+  const ta   = (x={}) => ({ ...inp(), resize:"vertical", minHeight:68, lineHeight:1.55, ...x });
+  const tag  = (k) => ({ display:"inline-block", fontSize:11, padding:"2px 9px", borderRadius:100, fontWeight:500, background:(tags[k]||tags["Other"]).bg, color:(tags[k]||tags["Other"]).text, whiteSpace:"nowrap" });
+  const pbtn = { padding:"9px 18px", borderRadius:7, border:"none", background:T.accent, color:"#fff", fontSize:13, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontWeight:500 };
+  const gbtn = { padding:"8px 14px", borderRadius:7, border:`1px solid ${T.border2}`, background:T.surface2, color:T.text, fontSize:13, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" };
 
   // ── Accordion
   function Accord({ title, badge, badgeDone, open, onToggle, children }) {
     return (
-      <div style={card({ padding: 0, overflow: "hidden", marginBottom: 7 })}>
-        <button onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "13px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "'DM Sans',sans-serif" }}>
-          <span style={{ fontSize: 12, color: T.muted, display: "inline-block", transition: "transform 0.18s", transform: open ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>→</span>
-          <span style={{ flex: 1, fontWeight: 500, fontSize: 13.5, color: T.text }}>{title}</span>
-          {badge && <span style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, background: badgeDone ? T.greenBg : T.surface2, color: badgeDone ? T.green : T.muted, border: `1px solid ${T.border}`, flexShrink: 0 }}>{badge}</span>}
+      <div style={card({padding:0,overflow:"hidden",marginBottom:7})}>
+        <button onClick={onToggle} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 15px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
+          <span style={{fontSize:12,color:T.muted,display:"inline-block",transition:"transform 0.18s",transform:open?"rotate(90deg)":"rotate(0deg)",flexShrink:0}}>→</span>
+          <span style={{flex:1,fontWeight:500,fontSize:13.5,color:T.text}}>{title}</span>
+          {badge && <span style={{fontSize:11,padding:"2px 9px",borderRadius:100,background:badgeDone?T.greenBg:T.surface2,color:badgeDone?T.green:T.muted,border:`1px solid ${T.border}`,flexShrink:0}}>{badge}</span>}
         </button>
-        {open && <div style={{ padding: "2px 15px 15px", borderTop: `1px solid ${T.border}` }}>{children}</div>}
+        {open && <div style={{padding:"2px 15px 15px",borderTop:`1px solid ${T.border}`}}>{children}</div>}
       </div>
     );
   }
 
-  function PageHead({ title, sub }) {
-    return (
-      <>
-        <div style={{ fontSize: isMobile ? 20 : 22, fontWeight: 600, color: T.text, letterSpacing: "-0.02em", marginBottom: 3 }}>{title}</div>
-        <div style={{ fontSize: 13, color: T.muted, marginBottom: 22 }}>{sub}</div>
-      </>
-    );
+  function PH({ title, sub }) {
+    return <>
+      <div style={{fontSize:isMobile?20:22,fontWeight:600,color:T.text,letterSpacing:"-0.02em",marginBottom:3}}>{title}</div>
+      <div style={{fontSize:13,color:T.muted,marginBottom:22}}>{sub}</div>
+    </>;
   }
 
-  // ── Loading screen
-  if (!connected) return <SetupScreen onDone={(t) => { setToken(t); setConnected(true); }} />;
+  // ── Early returns
+  if (status === "checking") return (
+    <div style={{minHeight:"100vh",background:"#f8f7f4",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:28,height:28,borderRadius:"50%",border:"2px solid rgba(0,0,0,0.1)",borderTopColor:"#2563eb",animation:"spin 0.8s linear infinite"}} />
+      <div style={{fontSize:13,color:"#78756e"}}>Connecting to Notion…</div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
 
-  if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif", flexDirection: "column", gap: 14 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", border: `2px solid ${T.border}`, borderTopColor: T.accent, animation: "spin 0.8s linear infinite" }} />
-        <div style={{ fontSize: 13, color: T.muted }}>Loading from Notion…</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  if (status === "no-token") return <NotConfigured />;
+
+  if (status === "error") return (
+    <div style={{minHeight:"100vh",background:"#f8f7f4",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:24}}>
+      <div style={{maxWidth:480,textAlign:"center"}}>
+        <div style={{fontSize:20,fontWeight:600,color:"#1c1b18",marginBottom:8}}>Connection error</div>
+        <p style={{fontSize:13.5,color:"#78756e",lineHeight:1.7}}>Could not reach the server. Make sure the app is deployed on Vercel and try reloading.</p>
       </div>
-    );
-  }
+    </div>
+  );
+
+  if (loading) return (
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:28,height:28,borderRadius:"50%",border:`2px solid ${T.border}`,borderTopColor:T.accent,animation:"spin 0.8s linear infinite"}} />
+      <div style={{fontSize:13,color:T.muted}}>Loading from Notion…</div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
 
   // ── Sidebar
   const Sidebar = () => (
-    <aside style={{ width: 210, background: T.sidebarBg, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0, height: "100vh", position: "sticky", top: 0 }}>
-      <div style={{ padding: "20px 16px 13px", borderBottom: `1px solid ${T.border}` }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text, letterSpacing: "-0.01em" }}>501(c)(3) Dashboard</div>
-        <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>Synced with Notion</div>
+    <aside style={{width:210,background:T.sidebarBg,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0,height:"100vh",position:"sticky",top:0}}>
+      <div style={{padding:"20px 16px 13px",borderBottom:`1px solid ${T.border}`}}>
+        <div style={{fontSize:13.5,fontWeight:600,color:T.text,letterSpacing:"-0.01em"}}>501(c)(3) Dashboard</div>
+        <div style={{fontSize:11,color:T.muted,marginTop:2}}>Synced with Notion</div>
       </div>
-      <nav style={{ flex: 1, padding: "7px 7px", overflowY: "auto" }}>
+      <nav style={{flex:1,padding:"7px 7px",overflowY:"auto"}}>
         {NAV_ITEMS.map(item => (
-          <button key={item.id} onClick={() => setActiveNav(item.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", borderRadius: 7, border: "none", cursor: "pointer", background: activeNav === item.id ? T.accentBg : "transparent", color: activeNav === item.id ? T.accent : T.muted, fontSize: 13, fontFamily: "'DM Sans',sans-serif", fontWeight: activeNav === item.id ? 500 : 400, borderLeft: `2px solid ${activeNav === item.id ? T.accent : "transparent"}`, marginBottom: 1, textAlign: "left", transition: "all 0.1s" }}>
-            <span style={{ fontSize: 11, opacity: 0.7 }}>→</span>{item.label}
+          <button key={item.id} onClick={() => setActiveNav(item.id)} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 10px",borderRadius:7,border:"none",cursor:"pointer",background:activeNav===item.id?T.accentBg:"transparent",color:activeNav===item.id?T.accent:T.muted,fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:activeNav===item.id?500:400,borderLeft:`2px solid ${activeNav===item.id?T.accent:"transparent"}`,marginBottom:1,textAlign:"left",transition:"all 0.1s"}}>
+            <span style={{fontSize:11,opacity:0.7}}>→</span>{item.label}
           </button>
         ))}
       </nav>
-      <div style={{ padding: "11px 13px 16px", borderTop: `1px solid ${T.border}` }}>
-        <button onClick={() => setDark(d => !d)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "7px 10px", borderRadius: 7, border: `1px solid ${T.border}`, background: T.surface2, color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", marginBottom: 10 }}>
-          <span>{dark ? "○" : "☀"}</span><span>{dark ? "Dark mode" : "Light mode"}</span>
+      <div style={{padding:"11px 13px 16px",borderTop:`1px solid ${T.border}`}}>
+        <button onClick={()=>setDark(d=>!d)} style={{display:"flex",alignItems:"center",gap:7,width:"100%",padding:"7px 10px",borderRadius:7,border:`1px solid ${T.border}`,background:T.surface2,color:T.muted,fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",marginBottom:10}}>
+          <span>{dark?"○":"☀"}</span><span>{dark?"Dark mode":"Light mode"}</span>
         </button>
-        <div style={{ ...lbl, marginBottom: 5 }}>Overall progress</div>
-        <div style={{ background: T.progTrack, borderRadius: 100, height: 3, marginBottom: 5 }}>
-          <div style={{ width: `${pct}%`, height: "100%", borderRadius: 100, background: T.progFill, transition: "width 0.4s" }} />
+        <div style={{...lbl,marginBottom:5}}>Overall progress</div>
+        <div style={{background:T.progTrack,borderRadius:100,height:3,marginBottom:5}}>
+          <div style={{width:`${pct}%`,height:"100%",borderRadius:100,background:T.progFill,transition:"width 0.4s"}} />
         </div>
-        <div style={{ fontSize: 11.5, color: T.accent, fontWeight: 500 }}>{pct}% — {doneTasks}/{totalTasks} steps</div>
+        <div style={{fontSize:11.5,color:T.accent,fontWeight:500}}>{pct}% — {doneTasks}/{totalTasks} steps</div>
       </div>
     </aside>
   );
 
-  // ── Bottom nav (mobile)
+  // ── Bottom nav
   const BottomNav = () => {
-    const visible = NAV_ITEMS.slice(0, 5);
-    const overflow = NAV_ITEMS.slice(5);
-    const anyOverflowActive = overflow.some(i => i.id === activeNav);
+    const vis = NAV_ITEMS.slice(0,5);
+    const ovr = NAV_ITEMS.slice(5);
+    const anyOvr = ovr.some(i=>i.id===activeNav);
     return (
-      <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebarBg, borderTop: `1px solid ${T.border}`, display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom)" }}>
-        {visible.map(item => (
-          <button key={item.id} onClick={() => setActiveNav(item.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "9px 4px 8px", border: "none", cursor: "pointer", background: "transparent", color: activeNav === item.id ? T.accent : T.muted, fontFamily: "'DM Sans',sans-serif" }}>
-            <span style={{ fontSize: 14 }}>→</span>
-            <span style={{ fontSize: 10, fontWeight: activeNav === item.id ? 600 : 400 }}>{item.shortLabel}</span>
+      <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.sidebarBg,borderTop:`1px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
+        {vis.map(item=>(
+          <button key={item.id} onClick={()=>setActiveNav(item.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"9px 4px 8px",border:"none",cursor:"pointer",background:"transparent",color:activeNav===item.id?T.accent:T.muted,fontFamily:"'DM Sans',sans-serif"}}>
+            <span style={{fontSize:14}}>→</span>
+            <span style={{fontSize:10,fontWeight:activeNav===item.id?600:400}}>{item.shortLabel}</span>
           </button>
         ))}
-        <div style={{ flex: 1, position: "relative" }}>
-          {moreOpen && (
-            <>
-              <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 150 }} />
-              <div style={{ position: "fixed", bottom: 58, right: 0, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "6px 0", minWidth: 160, zIndex: 200, boxShadow: "0 -4px 20px rgba(0,0,0,0.1)" }}>
-                {overflow.map(item => (
-                  <button key={item.id} onClick={() => { setActiveNav(item.id); setMoreOpen(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", cursor: "pointer", background: "transparent", color: activeNav === item.id ? T.accent : T.text, fontFamily: "'DM Sans',sans-serif", fontSize: 13, textAlign: "left", fontWeight: activeNav === item.id ? 500 : 400 }}>
-                    → {item.label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          <button onClick={() => setMoreOpen(o => !o)} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "9px 4px 8px", border: "none", cursor: "pointer", background: "transparent", color: anyOverflowActive ? T.accent : T.muted, fontFamily: "'DM Sans',sans-serif" }}>
-            <span style={{ fontSize: 14, letterSpacing: "0.1em" }}>···</span>
-            <span style={{ fontSize: 10, fontWeight: anyOverflowActive ? 600 : 400 }}>More</span>
+        <div style={{flex:1,position:"relative"}}>
+          {moreOpen&&<>
+            <div onClick={()=>setMoreOpen(false)} style={{position:"fixed",inset:0,zIndex:150}}/>
+            <div style={{position:"fixed",bottom:58,right:0,background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 0",minWidth:160,zIndex:200,boxShadow:"0 -4px 20px rgba(0,0,0,0.1)"}}>
+              {ovr.map(item=>(
+                <button key={item.id} onClick={()=>{setActiveNav(item.id);setMoreOpen(false);}} style={{display:"block",width:"100%",padding:"10px 16px",border:"none",cursor:"pointer",background:"transparent",color:activeNav===item.id?T.accent:T.text,fontFamily:"'DM Sans',sans-serif",fontSize:13,textAlign:"left",fontWeight:activeNav===item.id?500:400}}>→ {item.label}</button>
+              ))}
+            </div>
+          </>}
+          <button onClick={()=>setMoreOpen(o=>!o)} style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"9px 4px 8px",border:"none",cursor:"pointer",background:"transparent",color:anyOvr?T.accent:T.muted,fontFamily:"'DM Sans',sans-serif"}}>
+            <span style={{fontSize:14,letterSpacing:"0.1em"}}>···</span>
+            <span style={{fontSize:10,fontWeight:anyOvr?600:400}}>More</span>
           </button>
         </div>
       </nav>
@@ -519,334 +483,280 @@ export default function App() {
   // PAGES
   // ─────────────────────────────────────────────
   const pages = {
-    overview: (
-      <div>
-        <PageHead title="Dashboard" sub="Synced with Notion — changes save automatically" />
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 10, marginBottom: 18 }}>
-          {[{ label: "Phases complete", val: `${phasesDone}/7` }, { label: "Steps done", val: `${doneTasks}/${totalTasks}` }, { label: "Progress", val: `${pct}%` }, { label: "Assets saved", val: assets.length }].map(c => (
-            <div key={c.label} style={card({ padding: "14px 16px", marginBottom: 0 })}>
-              <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 600, color: T.accent, letterSpacing: "-0.02em" }}>{c.val}</div>
-              <div style={{ fontSize: 10, color: T.muted, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 3, fontWeight: 500 }}>{c.label}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={card()}>
-          <span style={lbl}>Organization profile — edits save automatically</span>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-            {[
-              ["name", "Organization Name", "e.g. Verity Foundation"],
-              ["state", "State of Incorporation", "e.g. Virginia"],
-              ["ein", "EIN (once assigned)", "xx-xxxxxxx"],
-              ["fiscalYear", "Fiscal Year End", "e.g. December 31"],
-            ].map(([field, notionKey, ph]) => (
-              <div key={field}>
-                <span style={lbl}>{notionKey}</span>
-                <input style={inp()} type="text" placeholder={ph} value={orgFields[field]} onChange={e => handleOrgField(field, notionKey, e.target.value)} />
-              </div>
-            ))}
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}>
-              <span style={lbl}>Vision Statement</span>
-              <textarea style={ta()} placeholder="The long-term future your organization aspires to create…" value={orgFields.vision} onChange={e => handleOrgField("vision", "Vision", e.target.value)} />
-            </div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}>
-              <span style={lbl}>Mission Statement</span>
-              <textarea style={ta()} placeholder="What your organization does, for whom, and why…" value={orgFields.mission} onChange={e => handleOrgField("mission", "Mission", e.target.value)} />
-            </div>
+    overview: <div>
+      <PH title="Dashboard" sub="Synced with Notion — changes save automatically" />
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10,marginBottom:18}}>
+        {[{label:"Phases complete",val:`${phasesDone}/7`},{label:"Steps done",val:`${doneTasks}/${totalTasks}`},{label:"Progress",val:`${pct}%`},{label:"Assets saved",val:assets.length}].map(c=>(
+          <div key={c.label} style={card({padding:"14px 16px",marginBottom:0})}>
+            <div style={{fontSize:isMobile?20:24,fontWeight:600,color:T.accent,letterSpacing:"-0.02em"}}>{c.val}</div>
+            <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginTop:3,fontWeight:500}}>{c.label}</div>
           </div>
+        ))}
+      </div>
+      <div style={card()}>
+        <span style={lbl}>Organization profile — auto-saves after 1.2s</span>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+          {[["name","Organization Name","e.g. Verity Foundation"],["state","State of Incorporation","e.g. Virginia"],["ein","EIN (once assigned)","xx-xxxxxxx"],["fiscalYear","Fiscal Year End","e.g. December 31"]].map(([f,nk,ph])=>(
+            <div key={f}><span style={lbl}>{nk}</span><input style={inp()} type="text" placeholder={ph} value={orgFields[f]} onChange={e=>handleOrgField(f,nk,e.target.value)}/></div>
+          ))}
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Vision Statement</span><textarea style={ta()} placeholder="The long-term future your organization aspires to create…" value={orgFields.vision} onChange={e=>handleOrgField("vision","Vision",e.target.value)}/></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Mission Statement</span><textarea style={ta()} placeholder="What your organization does, for whom, and why…" value={orgFields.mission} onChange={e=>handleOrgField("mission","Mission",e.target.value)}/></div>
         </div>
+      </div>
+      <div style={card()}>
+        <span style={lbl}>Phase summary</span>
+        {PHASES.map(ph=>{
+          const done=ph.tasks.filter((_,ti)=>checks[`${ph.id}-${ti}`]).length;
+          const p=Math.round((done/ph.tasks.length)*100);
+          return <div key={ph.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <span style={{fontSize:11,color:T.muted2,flexShrink:0}}>→</span>
+            <span style={{flex:1,fontSize:13,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ph.title}</span>
+            <span style={{fontSize:11,color:T.muted,flexShrink:0}}>{done}/{ph.tasks.length}</span>
+            <div style={{width:isMobile?60:88,background:T.progTrack,borderRadius:100,height:3,flexShrink:0}}>
+              <div style={{width:`${p}%`,height:"100%",borderRadius:100,background:p===100?T.green:T.accent,transition:"width 0.4s"}}/>
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>,
 
-        <div style={card()}>
-          <span style={lbl}>Phase summary</span>
-          {PHASES.map(ph => {
-            const done = ph.tasks.filter((_, ti) => checks[`${ph.id}-${ti}`]).length;
-            const p = Math.round((done / ph.tasks.length) * 100);
-            return (
-              <div key={ph.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <span style={{ fontSize: 11, color: T.muted2, flexShrink: 0 }}>→</span>
-                <span style={{ flex: 1, fontSize: 13, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ph.title}</span>
-                <span style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>{done}/{ph.tasks.length}</span>
-                <div style={{ width: isMobile ? 60 : 88, background: T.progTrack, borderRadius: 100, height: 3, flexShrink: 0 }}>
-                  <div style={{ width: `${p}%`, height: "100%", borderRadius: 100, background: p === 100 ? T.green : T.accent, transition: "width 0.4s" }} />
-                </div>
+    checklist: <div>
+      <PH title="Formation Checklist" sub="Checkboxes sync to Notion instantly" />
+      {PHASES.map(ph=>{
+        const done=ph.tasks.filter((_,ti)=>checks[`${ph.id}-${ti}`]).length;
+        return <Accord key={ph.id} open={expandedPhase===ph.id} onToggle={()=>setExpandedPhase(expandedPhase===ph.id?null:ph.id)} title={ph.title} badge={`${done}/${ph.tasks.length}`} badgeDone={done===ph.tasks.length}>
+          {ph.tasks.map((task,ti)=>{
+            const checked=!!checks[`${ph.id}-${ti}`];
+            return <div key={ti} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.border}`}}>
+              <input type="checkbox" checked={checked} onChange={()=>toggleCheck(ph.id,ti)} style={{marginTop:2,accentColor:T.accent,cursor:"pointer",flexShrink:0,width:15,height:15}}/>
+              <div>
+                <div style={{fontSize:13.5,color:checked?T.muted:T.text,textDecoration:checked?"line-through":"none",lineHeight:1.4}}>{task.t}</div>
+                {task.n&&<div style={{fontSize:11.5,color:T.muted2,marginTop:2}}>{task.n}</div>}
               </div>
-            );
+            </div>;
           })}
+          {ph.links?.length>0&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px dashed ${T.border}`}}>
+            <span style={lbl}>Resources</span>
+            {ph.links.map((lk,li)=><a key={li} href={lk.u} target="_blank" rel="noreferrer" style={{fontSize:13,color:T.accent,marginRight:12,textDecoration:"none",display:"inline-block",marginBottom:3}}>→ {lk.l}</a>)}
+          </div>}
+        </Accord>;
+      })}
+    </div>,
+
+    consider: <div>
+      <PH title="Things to Consider" sub="Key decisions, risks, and nuances across every domain" />
+      {CONSIDERATIONS.map(cat=>(
+        <Accord key={cat.cat} open={expandedConsider===cat.cat} onToggle={()=>setExpandedConsider(expandedConsider===cat.cat?null:cat.cat)} title={cat.cat} badge={`${cat.items.length} items`}>
+          {cat.items.map((item,i)=>(
+            <div key={i} style={{display:"flex",gap:11,padding:"11px 0",borderBottom:`1px solid ${T.border}`}}>
+              <div style={{width:20,height:20,borderRadius:"50%",background:T.accentBg,border:`1px solid ${T.accentBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:T.accent,fontWeight:600,flexShrink:0,marginTop:2}}>{i+1}</div>
+              <p style={{fontSize:13.5,color:T.text,lineHeight:1.65}}>{item}</p>
+            </div>
+          ))}
+        </Accord>
+      ))}
+    </div>,
+
+    board: <div>
+      <PH title="Board of Directors" sub="Board directory and meeting notes live in your Notion workspace" />
+      <div style={card()}>
+        <p style={{fontSize:13.5,color:T.text,lineHeight:1.7,marginBottom:12}}>Your board directory and meeting notes are managed directly in Notion. Click below to open them.</p>
+        <a href="https://www.notion.so/330fffd7c625812ab70bf242b5b39898" target="_blank" rel="noreferrer" style={{...pbtn,display:"inline-block",textDecoration:"none"}}>→ Open Board in Notion</a>
+      </div>
+      <div style={card()}>
+        <span style={lbl}>Board governance reminders</span>
+        {["Hold regular board meetings (at minimum quarterly)", "Document all decisions and votes in written minutes", "Review and re-sign conflict of interest policy annually", "Ensure board size stays at or above 3 unrelated individuals", "Conduct annual board self-evaluation"].map((item,i)=>(
+          <div key={i} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.border}`,fontSize:13.5,color:T.text}}>
+            <span style={{color:T.accent,flexShrink:0}}>→</span>{item}
+          </div>
+        ))}
+      </div>
+    </div>,
+
+    impact: <div>
+      <PH title="Impact Report" sub="Structure and content guidance for your annual impact report" />
+      <div style={{...card(),display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <button style={gbtn} onClick={()=>pdfRef.current.click()}>→ Upload PDF</button>
+        <span style={{fontSize:13,color:impactPdf?T.green:T.muted}}>{impactPdf?`${impactPdf} ✓`:"No file uploaded yet"}</span>
+        <input ref={pdfRef} type="file" accept=".pdf" style={{display:"none"}} onChange={e=>setImpactPdf(e.target.files?.[0]?.name||null)}/>
+      </div>
+      <span style={lbl}>Report sections</span>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(250px,1fr))",gap:10}}>
+        {IMPACT_SECTIONS.map((sec,i)=>(
+          <div key={i} style={card({marginBottom:0,padding:"14px 16px"})}>
+            <div style={{fontSize:12,color:T.accent,marginBottom:6}}>→</div>
+            <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:5}}>{sec.title}</div>
+            <div style={{fontSize:12.5,color:T.muted,lineHeight:1.65}}>{sec.desc}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{...card(),marginTop:12}}>
+        <span style={lbl}>Key metrics to track</span>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:2}}>
+          {METRICS.map((m,i)=>(
+            <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:T.text,padding:"5px 0"}}>
+              <span style={{color:T.accent,flexShrink:0,marginTop:1,fontSize:11}}>→</span>{m}
+            </div>
+          ))}
         </div>
       </div>
-    ),
+    </div>,
 
-    checklist: (
-      <div>
-        <PageHead title="Formation Checklist" sub="Checkboxes sync to Notion instantly" />
-        {PHASES.map(ph => {
-          const done = ph.tasks.filter((_, ti) => checks[`${ph.id}-${ti}`]).length;
-          return (
-            <Accord key={ph.id} open={expandedPhase === ph.id} onToggle={() => setExpandedPhase(expandedPhase === ph.id ? null : ph.id)} title={ph.title} badge={`${done}/${ph.tasks.length}`} badgeDone={done === ph.tasks.length}>
-              {ph.tasks.map((task, ti) => {
-                const checked = !!checks[`${ph.id}-${ti}`];
-                return (
-                  <div key={ti} style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: `1px solid ${T.border}` }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleCheck(ph.id, ti)} style={{ marginTop: 2, accentColor: T.accent, cursor: "pointer", flexShrink: 0, width: 15, height: 15 }} />
-                    <div>
-                      <div style={{ fontSize: 13.5, color: checked ? T.muted : T.text, textDecoration: checked ? "line-through" : "none", lineHeight: 1.4 }}>{task.t}</div>
-                      {task.n && <div style={{ fontSize: 11.5, color: T.muted2, marginTop: 2 }}>{task.n}</div>}
-                    </div>
+    financials: <div>
+      <PH title="Financials" sub="Year 1 budget, compliance timeline, and required documents" />
+      <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
+        {["budget","timeline","documents"].map(tab=>(
+          <button key={tab} onClick={()=>setActiveFinTab(tab)} style={{padding:"7px 15px",borderRadius:7,border:`1px solid ${activeFinTab===tab?T.accent:T.border}`,background:activeFinTab===tab?T.accentBg:"transparent",color:activeFinTab===tab?T.accent:T.muted,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:activeFinTab===tab?500:400,textTransform:"capitalize"}}>{tab}</button>
+        ))}
+      </div>
+      {activeFinTab==="budget"&&<div>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:10,marginBottom:18}}>
+          {[{label:"Total Revenue",val:fmtCurrency(totalRevenue),color:T.green},{label:"Total Expenses",val:fmtCurrency(totalExpenses),color:T.red},{label:"Net Surplus",val:(surplus>=0?"+":"")+fmtCurrency(surplus),color:surplus>=0?T.green:T.red}].map(c=>(
+            <div key={c.label} style={card({marginBottom:0})}>
+              <div style={{fontSize:20,fontWeight:600,color:c.color,letterSpacing:"-0.02em"}}>{c.val}</div>
+              <div style={{fontSize:10.5,color:T.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginTop:3,fontWeight:500}}>{c.label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}>
+          {[{title:"Revenue Sources",rows:FINANCIALS.revenue,total:totalRevenue,color:T.green},{title:"Expense Categories",rows:FINANCIALS.budget,total:totalExpenses,color:T.red}].map(table=>(
+            <div key={table.title} style={card()}>
+              <div style={{fontSize:13,fontWeight:500,color:T.text,marginBottom:14}}>{table.title}</div>
+              {table.rows.map((row,i)=>{
+                const p=Math.round((row.amount/table.total)*100);
+                return <div key={i} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3,fontSize:13}}>
+                    <span style={{color:T.text,flex:1,paddingRight:8}}>{row.category}</span>
+                    <span style={{color:T.muted,flexShrink:0}}>{fmtCurrency(row.amount)}</span>
                   </div>
-                );
+                  <div style={{background:T.progTrack,borderRadius:100,height:3}}>
+                    <div style={{width:`${p}%`,height:"100%",borderRadius:100,background:table.color,opacity:0.75}}/>
+                  </div>
+                </div>;
               })}
-              {ph.links?.length > 0 && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.border}` }}>
-                  <span style={lbl}>Resources</span>
-                  {ph.links.map((lk, li) => <a key={li} href={lk.u} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: T.accent, marginRight: 12, textDecoration: "none", display: "inline-block", marginBottom: 3 }}>→ {lk.l}</a>)}
-                </div>
-              )}
-            </Accord>
-          );
-        })}
-      </div>
-    ),
-
-    consider: (
-      <div>
-        <PageHead title="Things to Consider" sub="Key decisions, risks, and nuances across every domain" />
-        {CONSIDERATIONS.map(cat => (
-          <Accord key={cat.cat} open={expandedConsider === cat.cat} onToggle={() => setExpandedConsider(expandedConsider === cat.cat ? null : cat.cat)} title={cat.cat} badge={`${cat.items.length} items`}>
-            {cat.items.map((item, i) => (
-              <div key={i} style={{ display: "flex", gap: 11, padding: "11px 0", borderBottom: `1px solid ${T.border}` }}>
-                <div style={{ width: 20, height: 20, borderRadius: "50%", background: T.accentBg, border: `1px solid ${T.accentBorder}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, color: T.accent, fontWeight: 600, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
-                <p style={{ fontSize: 13.5, color: T.text, lineHeight: 1.65 }}>{item}</p>
-              </div>
-            ))}
-          </Accord>
-        ))}
-      </div>
-    ),
-
-    board: (
-      <div>
-        <PageHead title="Board of Directors" sub="Board meetings and member notes are logged in your Notion workspace" />
-        <div style={card()}>
-          <p style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 12 }}>
-            Your board directory and meeting notes live in Notion. Use the link below to add members and log meetings directly — they'll always be up to date.
-          </p>
-          <a href="https://www.notion.so/330fffd7c625812ab70bf242b5b39898" target="_blank" rel="noreferrer" style={{ ...primaryBtn, display: "inline-block", textDecoration: "none" }}>→ Open Board in Notion</a>
-        </div>
-        <div style={card()}>
-          <span style={lbl}>Board governance reminders</span>
-          {["Hold regular board meetings (at minimum quarterly recommended)", "Document all decisions and votes in written minutes", "Review and re-sign conflict of interest policy annually", "Ensure board size stays at or above 3 unrelated individuals", "Conduct annual board self-evaluation"].map((item, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13.5, color: T.text }}>
-              <span style={{ color: T.accent, flexShrink: 0 }}>→</span>{item}
             </div>
           ))}
         </div>
-      </div>
-    ),
-
-    impact: (
-      <div>
-        <PageHead title="Impact Report" sub="Structure and content guidance for your annual impact report" />
-        <div style={{ ...card(), display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <button style={ghostBtn} onClick={() => pdfRef.current.click()}>→ Upload PDF</button>
-          <span style={{ fontSize: 13, color: impactPdf ? T.green : T.muted }}>{impactPdf ? `${impactPdf} ✓` : "No file uploaded yet"}</span>
-          <input ref={pdfRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => setImpactPdf(e.target.files?.[0]?.name || null)} />
-        </div>
-        <span style={lbl}>Report sections</span>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill,minmax(250px,1fr))", gap: 10 }}>
-          {IMPACT_SECTIONS.map((sec, i) => (
-            <div key={i} style={card({ marginBottom: 0, padding: "14px 16px" })}>
-              <div style={{ fontSize: 12, color: T.accent, marginBottom: 6 }}>→</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 5 }}>{sec.title}</div>
-              <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.65 }}>{sec.desc}</div>
+      </div>}
+      {activeFinTab==="timeline"&&<div style={card()}>
+        <div style={{position:"relative",paddingLeft:18}}>
+          <div style={{position:"absolute",left:5,top:0,bottom:0,width:1,background:T.border}}/>
+          {FINANCIALS.timeline.map((item,i)=>(
+            <div key={i} style={{position:"relative",marginBottom:20,paddingLeft:14}}>
+              <div style={{position:"absolute",left:-17,top:5,width:7,height:7,borderRadius:"50%",background:T.accent,border:`2px solid ${T.bg}`}}/>
+              <div style={{fontSize:10.5,color:T.accent,textTransform:"uppercase",letterSpacing:"0.09em",marginBottom:2,fontWeight:500}}>{item.month}</div>
+              <div style={{fontSize:13.5,color:T.text,lineHeight:1.5}}>{item.milestone}</div>
             </div>
           ))}
         </div>
-        <div style={{ ...card(), marginTop: 12 }}>
-          <span style={lbl}>Key metrics to track</span>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 2 }}>
-            {METRICS.map((m, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: T.text, padding: "5px 0" }}>
-                <span style={{ color: T.accent, flexShrink: 0, marginTop: 1, fontSize: 11 }}>→</span>{m}
+      </div>}
+      {activeFinTab==="documents"&&(isMobile?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {FINANCIALS.documents.map((doc,i)=>(
+            <div key={i} style={card({marginBottom:0,padding:"13px 15px"})}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:5}}>
+                <span style={{fontSize:13.5,fontWeight:500,color:T.text}}>{doc.name}</span>
+                <span style={tag(doc.status)}>{doc.status}</span>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    ),
-
-    financials: (
-      <div>
-        <PageHead title="Financials" sub="Year 1 budget, compliance timeline, and required documents" />
-        <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-          {["budget", "timeline", "documents"].map(tab => (
-            <button key={tab} onClick={() => setActiveFinTab(tab)} style={{ padding: "7px 15px", borderRadius: 7, border: `1px solid ${activeFinTab === tab ? T.accent : T.border}`, background: activeFinTab === tab ? T.accentBg : "transparent", color: activeFinTab === tab ? T.accent : T.muted, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: activeFinTab === tab ? 500 : 400, textTransform: "capitalize" }}>{tab}</button>
+              <span style={{fontSize:12.5,color:T.muted}}>{doc.desc}</span>
+            </div>
           ))}
         </div>
-        {activeFinTab === "budget" && (
-          <div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3,1fr)", gap: 10, marginBottom: 18 }}>
-              {[{ label: "Total Revenue", val: fmtCurrency(totalRevenue), color: T.green }, { label: "Total Expenses", val: fmtCurrency(totalExpenses), color: T.red }, { label: "Net Surplus", val: (surplus >= 0 ? "+" : "") + fmtCurrency(surplus), color: surplus >= 0 ? T.green : T.red }].map(c => (
-                <div key={c.label} style={card({ marginBottom: 0 })}>
-                  <div style={{ fontSize: 20, fontWeight: 600, color: c.color, letterSpacing: "-0.02em" }}>{c.val}</div>
-                  <div style={{ fontSize: 10.5, color: T.muted, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 3, fontWeight: 500 }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-              {[{ title: "Revenue Sources", rows: FINANCIALS.revenue, total: totalRevenue, color: T.green }, { title: "Expense Categories", rows: FINANCIALS.budget, total: totalExpenses, color: T.red }].map(table => (
-                <div key={table.title} style={card()}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: T.text, marginBottom: 14 }}>{table.title}</div>
-                  {table.rows.map((row, i) => {
-                    const p = Math.round((row.amount / table.total) * 100);
-                    return (
-                      <div key={i} style={{ marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3, fontSize: 13 }}>
-                          <span style={{ color: T.text, flex: 1, paddingRight: 8 }}>{row.category}</span>
-                          <span style={{ color: T.muted, flexShrink: 0 }}>{fmtCurrency(row.amount)}</span>
-                        </div>
-                        <div style={{ background: T.progTrack, borderRadius: 100, height: 3 }}>
-                          <div style={{ width: `${p}%`, height: "100%", borderRadius: 100, background: table.color, opacity: 0.75 }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+      ):(
+        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 2fr 1fr",gap:12,padding:"11px 16px",borderBottom:`1px solid ${T.border}`}}>
+            {["Document","Description","Status"].map(h=><span key={h} style={lbl}>{h}</span>)}
           </div>
-        )}
-        {activeFinTab === "timeline" && (
-          <div style={card()}>
-            <div style={{ position: "relative", paddingLeft: 18 }}>
-              <div style={{ position: "absolute", left: 5, top: 0, bottom: 0, width: 1, background: T.border }} />
-              {FINANCIALS.timeline.map((item, i) => (
-                <div key={i} style={{ position: "relative", marginBottom: 20, paddingLeft: 14 }}>
-                  <div style={{ position: "absolute", left: -17, top: 5, width: 7, height: 7, borderRadius: "50%", background: T.accent, border: `2px solid ${T.bg}` }} />
-                  <div style={{ fontSize: 10.5, color: T.accent, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 2, fontWeight: 500 }}>{item.month}</div>
-                  <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.5 }}>{item.milestone}</div>
-                </div>
-              ))}
+          {FINANCIALS.documents.map((doc,i)=>(
+            <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 2fr 1fr",gap:12,padding:"12px 16px",alignItems:"center",background:i%2===0?"transparent":T.surface2,borderBottom:i<FINANCIALS.documents.length-1?`1px solid ${T.border}`:"none"}}>
+              <span style={{fontSize:13.5,fontWeight:500,color:T.text}}>{doc.name}</span>
+              <span style={{fontSize:12.5,color:T.muted}}>{doc.desc}</span>
+              <span style={tag(doc.status)}>{doc.status}</span>
             </div>
-          </div>
-        )}
-        {activeFinTab === "documents" && (
-          isMobile ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {FINANCIALS.documents.map((doc, i) => (
-                <div key={i} style={card({ marginBottom: 0, padding: "13px 15px" })}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 5 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 500, color: T.text }}>{doc.name}</span>
-                    <span style={tag(doc.status)}>{doc.status}</span>
-                  </div>
-                  <span style={{ fontSize: 12.5, color: T.muted }}>{doc.desc}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr", gap: 12, padding: "11px 16px", borderBottom: `1px solid ${T.border}` }}>
-                {["Document", "Description", "Status"].map(h => <span key={h} style={lbl}>{h}</span>)}
-              </div>
-              {FINANCIALS.documents.map((doc, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr", gap: 12, padding: "12px 16px", alignItems: "center", background: i % 2 === 0 ? "transparent" : T.surface2, borderBottom: i < FINANCIALS.documents.length - 1 ? `1px solid ${T.border}` : "none" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 500, color: T.text }}>{doc.name}</span>
-                  <span style={{ fontSize: 12.5, color: T.muted }}>{doc.desc}</span>
-                  <span style={tag(doc.status)}>{doc.status}</span>
-                </div>
-              ))}
-            </div>
-          )
-        )}
-      </div>
-    ),
-
-    assets: (
-      <div>
-        <PageHead title="Assets & Links" sub="Saved to Notion — accessible from any device" />
-        <div style={card()}>
-          <span style={lbl}>Add new asset</span>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <div><span style={lbl}>Title</span><input style={inp()} type="text" placeholder="e.g. IRS Form 1023-EZ" value={aTitle} onChange={e => setATitle(e.target.value)} /></div>
-            <div><span style={lbl}>URL</span><input style={inp()} type="text" placeholder="https://…" value={aUrl} onChange={e => setAUrl(e.target.value)} /></div>
-            <div><span style={lbl}>Category</span><select value={aCat} onChange={e => setACat(e.target.value)} style={inp({ height: 36 })}>{ASSET_CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
-            <div><span style={lbl}>Description (optional)</span><input style={inp()} type="text" placeholder="Brief note…" value={aDesc} onChange={e => setADesc(e.target.value)} /></div>
-          </div>
-          <button onClick={handleAddAsset} style={primaryBtn}>→ Save to Notion</button>
+          ))}
         </div>
-        <span style={lbl}>Saved assets ({assets.length})</span>
-        {assets.length === 0 && <div style={{ fontSize: 13, color: T.muted, padding: "14px 0" }}>No assets yet — add your first link above.</div>}
-        {assets.map((asset, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 9, marginBottom: 6 }}>
-            <span style={{ color: T.accent, fontSize: 12, flexShrink: 0, marginTop: 2 }}>→</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13.5, fontWeight: 500, color: T.text }}>{asset.title}</span>
-                <span style={tag(asset.category)}>{asset.category}</span>
-              </div>
-              {asset.desc && <div style={{ fontSize: 12, color: T.muted, marginBottom: 3 }}>{asset.desc}</div>}
-              <a href={asset.url} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: T.accent, textDecoration: "none", wordBreak: "break-all" }}>{asset.url}</a>
-            </div>
-            <button onClick={() => handleDeleteAsset(i)} style={{ background: "none", border: "none", cursor: "pointer", color: T.muted2, fontSize: 18, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>×</button>
-          </div>
-        ))}
-      </div>
-    ),
+      ))}
+    </div>,
 
-    weekly: (
-      <div>
-        <PageHead title="Weekly Activity Log" sub="Entries save to Notion — use for board meeting prep and reporting" />
-        <div style={card()}>
-          <span style={lbl}>Log this week</span>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <div><span style={lbl}>Week label</span><input style={inp()} type="text" placeholder="e.g. Week of March 24, 2026" value={wLabel} onChange={e => setWLabel(e.target.value)} /></div>
-            <div><span style={lbl}>Phase focus</span><select value={wPhase} onChange={e => setWPhase(e.target.value)} style={inp({ height: 36 })}>{PHASE_OPTIONS.map(p => <option key={p}>{p}</option>)}</select></div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}><span style={lbl}>Summary</span><textarea style={ta()} placeholder="1–2 sentence overview of this week's focus and outcomes…" value={wSummary} onChange={e => setWSummary(e.target.value)} /></div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}><span style={lbl}>Actions completed</span><textarea style={ta()} placeholder={"• Filed Articles of Incorporation\n• Opened bank account"} value={wDone} onChange={e => setWDone(e.target.value)} /></div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}><span style={lbl}>In progress</span><textarea style={ta({ minHeight: 56 })} placeholder="• Drafting bylaws — awaiting attorney review" value={wWip} onChange={e => setWWip(e.target.value)} /></div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}><span style={lbl}>Blockers</span><textarea style={ta({ minHeight: 56 })} placeholder="• State filing delay — estimated 2 weeks" value={wBlockers} onChange={e => setWBlockers(e.target.value)} /></div>
-            <div style={{ gridColumn: isMobile ? "1" : "1/-1" }}><span style={lbl}>Next steps</span><textarea style={ta({ minHeight: 56 })} placeholder={"• Schedule inaugural board meeting\n• Submit EIN application"} value={wNext} onChange={e => setWNext(e.target.value)} /></div>
-          </div>
-          <button onClick={handleAddWeek} style={primaryBtn}>→ Save to Notion</button>
+    assets: <div>
+      <PH title="Assets & Links" sub="Saved to Notion — accessible from any device" />
+      <div style={card()}>
+        <span style={lbl}>Add new asset</span>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:8,marginBottom:8}}>
+          <div><span style={lbl}>Title</span><input style={inp()} type="text" placeholder="e.g. IRS Form 1023-EZ" value={aTitle} onChange={e=>setATitle(e.target.value)}/></div>
+          <div><span style={lbl}>URL</span><input style={inp()} type="text" placeholder="https://…" value={aUrl} onChange={e=>setAUrl(e.target.value)}/></div>
+          <div><span style={lbl}>Category</span><select value={aCat} onChange={e=>setACat(e.target.value)} style={inp({height:36})}>{ASSET_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
+          <div><span style={lbl}>Description (optional)</span><input style={inp()} type="text" placeholder="Brief note…" value={aDesc} onChange={e=>setADesc(e.target.value)}/></div>
         </div>
-        <span style={lbl}>Previous entries ({weekEntries.length})</span>
-        {weekEntries.length === 0 && <div style={{ fontSize: 13, color: T.muted, padding: "14px 0" }}>No entries yet — log your first week above.</div>}
-        {weekEntries.map((entry, i) => {
-          const isOpen = expandedWeek === i;
-          return (
-            <div key={i} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, marginBottom: 7, overflow: "hidden" }}>
-              <button onClick={() => setExpandedWeek(isOpen ? null : i)} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "12px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "'DM Sans',sans-serif" }}>
-                <span style={{ fontSize: 12, color: T.muted, display: "inline-block", transition: "transform 0.18s", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>→</span>
-                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.label}</span>
-                {!isMobile && <span style={tag(entry.phase)}>{entry.phase}</span>}
-                <span style={{ fontSize: 11, color: T.muted, flexShrink: 0, marginLeft: 8 }}>#{weekEntries.length - i}</span>
-              </button>
-              {isOpen && (
-                <div style={{ padding: "13px 15px", borderTop: `1px solid ${T.border}` }}>
-                  {isMobile && <div style={{ marginBottom: 10 }}><span style={tag(entry.phase)}>{entry.phase}</span></div>}
-                  {entry.summary && <div style={{ marginBottom: 12 }}><span style={lbl}>Summary</span><div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{entry.summary}</div></div>}
-                  {[{ k: "done", l: "→ Actions completed" }, { k: "wip", l: "→ In progress" }, { k: "blockers", l: "→ Blockers" }, { k: "next", l: "→ Next steps" }].map(f => entry[f.k] ? (
-                    <div key={f.k} style={{ marginBottom: 12 }}>
-                      <span style={lbl}>{f.l}</span>
-                      <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6, whiteSpace: "pre-line" }}>{entry[f.k]}</div>
-                    </div>
-                  ) : null)}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        <button onClick={handleAddAsset} style={pbtn}>→ Save to Notion</button>
       </div>
-    ),
+      <span style={lbl}>Saved assets ({assets.length})</span>
+      {assets.length===0&&<div style={{fontSize:13,color:T.muted,padding:"14px 0"}}>No assets yet — add your first link above.</div>}
+      {assets.map((asset,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"11px 14px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:9,marginBottom:6}}>
+          <span style={{color:T.accent,fontSize:12,flexShrink:0,marginTop:2}}>→</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
+              <span style={{fontSize:13.5,fontWeight:500,color:T.text}}>{asset.title}</span>
+              <span style={tag(asset.category)}>{asset.category}</span>
+            </div>
+            {asset.desc&&<div style={{fontSize:12,color:T.muted,marginBottom:3}}>{asset.desc}</div>}
+            <a href={asset.url} target="_blank" rel="noreferrer" style={{fontSize:12.5,color:T.accent,textDecoration:"none",wordBreak:"break-all"}}>{asset.url}</a>
+          </div>
+          <button onClick={()=>handleDeleteAsset(i)} style={{background:"none",border:"none",cursor:"pointer",color:T.muted2,fontSize:18,padding:"0 2px",lineHeight:1,flexShrink:0}}>×</button>
+        </div>
+      ))}
+    </div>,
+
+    weekly: <div>
+      <PH title="Weekly Activity Log" sub="Entries save to Notion — perfect for board meeting prep" />
+      <div style={card()}>
+        <span style={lbl}>Log this week</span>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:8,marginBottom:8}}>
+          <div><span style={lbl}>Week label</span><input style={inp()} type="text" placeholder="e.g. Week of March 24, 2026" value={wLabel} onChange={e=>setWLabel(e.target.value)}/></div>
+          <div><span style={lbl}>Phase focus</span><select value={wPhase} onChange={e=>setWPhase(e.target.value)} style={inp({height:36})}>{PHASE_OPTIONS.map(p=><option key={p}>{p}</option>)}</select></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Summary</span><textarea style={ta()} placeholder="1–2 sentence overview of this week's focus and outcomes…" value={wSummary} onChange={e=>setWSummary(e.target.value)}/></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Actions completed</span><textarea style={ta()} placeholder={"• Filed Articles of Incorporation\n• Opened bank account"} value={wDone} onChange={e=>setWDone(e.target.value)}/></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>In progress</span><textarea style={ta({minHeight:56})} placeholder="• Drafting bylaws — awaiting attorney review" value={wWip} onChange={e=>setWWip(e.target.value)}/></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Blockers</span><textarea style={ta({minHeight:56})} placeholder="• State filing delay — estimated 2 weeks" value={wBlockers} onChange={e=>setWBlockers(e.target.value)}/></div>
+          <div style={{gridColumn:isMobile?"1":"1/-1"}}><span style={lbl}>Next steps</span><textarea style={ta({minHeight:56})} placeholder={"• Schedule inaugural board meeting\n• Submit EIN application"} value={wNext} onChange={e=>setWNext(e.target.value)}/></div>
+        </div>
+        <button onClick={handleAddWeek} style={pbtn}>→ Save to Notion</button>
+      </div>
+      <span style={lbl}>Previous entries ({weekEntries.length})</span>
+      {weekEntries.length===0&&<div style={{fontSize:13,color:T.muted,padding:"14px 0"}}>No entries yet — log your first week above.</div>}
+      {weekEntries.map((entry,i)=>{
+        const isOpen=expandedWeek===i;
+        return <div key={i} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:11,marginBottom:7,overflow:"hidden"}}>
+          <button onClick={()=>setExpandedWeek(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"12px 15px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif"}}>
+            <span style={{fontSize:12,color:T.muted,display:"inline-block",transition:"transform 0.18s",transform:isOpen?"rotate(90deg)":"rotate(0deg)",flexShrink:0}}>→</span>
+            <span style={{flex:1,fontSize:13.5,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{entry.label}</span>
+            {!isMobile&&<span style={tag(entry.phase)}>{entry.phase}</span>}
+            <span style={{fontSize:11,color:T.muted,flexShrink:0,marginLeft:8}}>#{weekEntries.length-i}</span>
+          </button>
+          {isOpen&&<div style={{padding:"13px 15px",borderTop:`1px solid ${T.border}`}}>
+            {isMobile&&<div style={{marginBottom:10}}><span style={tag(entry.phase)}>{entry.phase}</span></div>}
+            {entry.summary&&<div style={{marginBottom:12}}><span style={lbl}>Summary</span><div style={{fontSize:13.5,color:T.text,lineHeight:1.6}}>{entry.summary}</div></div>}
+            {[{k:"done",l:"→ Actions completed"},{k:"wip",l:"→ In progress"},{k:"blockers",l:"→ Blockers"},{k:"next",l:"→ Next steps"}].map(f=>entry[f.k]?(
+              <div key={f.k} style={{marginBottom:12}}>
+                <span style={lbl}>{f.l}</span>
+                <div style={{fontSize:13.5,color:T.text,lineHeight:1.6,whiteSpace:"pre-line"}}>{entry[f.k]}</div>
+              </div>
+            ):null)}
+          </div>}
+        </div>;
+      })}
+    </div>,
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: T.bg, fontFamily: "'DM Sans',sans-serif", color: T.text, fontSize: 14 }}>
-      <SaveBadge status={saveStatus} />
-      {!isMobile && <Sidebar />}
-      <main style={{ flex: 1, overflowY: "auto", padding: isMobile ? "20px 16px 80px" : "32px 44px 56px" }}>
+    <div style={{display:"flex",height:"100vh",overflow:"hidden",background:T.bg,fontFamily:"'DM Sans',sans-serif",color:T.text,fontSize:14}}>
+      <SaveBadge status={saveStatus}/>
+      {!isMobile&&<Sidebar/>}
+      <main style={{flex:1,overflowY:"auto",padding:isMobile?"20px 16px 80px":"32px 44px 56px"}}>
         {pages[activeNav]}
       </main>
-      {isMobile && <BottomNav />}
+      {isMobile&&<BottomNav/>}
     </div>
   );
 }
