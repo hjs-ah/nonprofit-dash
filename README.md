@@ -1,41 +1,65 @@
 # 501(c)(3) Formation Dashboard
 
-A React + Vite web app for tracking nonprofit formation progress, managing board members, logging weekly activity, and organizing assets and links.
+A React + Vite web app for tracking nonprofit formation progress, managing board members, logging weekly activity, and organizing assets — synced to Notion.
 
 ---
 
-## Local Development
+## ⚠️ Token security
+
+Your Notion integration token is a secret. It must **never** be pasted into source code or committed to git.
+
+This project reads the token from an environment variable named `VITE_NOTION_TOKEN`. Set it in Vercel (for production) or in `.env.local` (for local development). Both methods are described below.
+
+---
+
+## Step 1 — Create your Notion integration
+
+1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations)
+2. Click **+ New integration**
+3. Name it `501c3 Dashboard`, select your workspace, click **Save**
+4. Copy the **Internal Integration Secret** (starts with `ntn_` or `secret_`)
+
+## Step 2 — Share your Notion databases with the integration
+
+Open each database in Notion → click **…** (top right) → **Connections** → find and add your integration:
+
+- Checklist Progress
+- Organization Profile
+- Assets & Links
+- Weekly Activity Log
+
+---
+
+## Local development
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) v18 or higher
-- npm (comes with Node)
 
-### Run locally
+### Setup
 
 ```bash
-# 1. Install dependencies
+# 1. Copy the example env file
+cp .env.local.example .env.local
+
+# 2. Paste your Notion token into .env.local
+#    Open .env.local and replace the placeholder:
+#    VITE_NOTION_TOKEN=ntn_your_actual_token_here
+
+# 3. Install dependencies
 npm install
 
-# 2. Start the dev server
+# 4. Start the dev server
 npm run dev
+# Opens at http://localhost:5173
 ```
 
-The app opens at **http://localhost:5173** and hot-reloads on file saves.
+`.env.local` is listed in `.gitignore` and will never be committed.
 
 ---
 
-## Deploy to Vercel via GitHub
+## Deploy to Vercel
 
-### Step 1 — Create a GitHub repo
-
-1. Go to [github.com/new](https://github.com/new)
-2. Name it `nonprofit-dashboard` (or anything you like)
-3. Set to Private if preferred
-4. Click **Create repository**
-
-### Step 2 — Push this project to GitHub
-
-In your terminal, inside this project folder:
+### Push to GitHub
 
 ```bash
 git init
@@ -46,34 +70,35 @@ git remote add origin https://github.com/YOUR_USERNAME/nonprofit-dashboard.git
 git push -u origin main
 ```
 
-Replace `YOUR_USERNAME` with your actual GitHub username.
+### Connect to Vercel
 
-### Step 3 — Deploy on Vercel
+1. Go to [vercel.com](https://vercel.com) → **Add New Project**
+2. Import your GitHub repo
+3. Before clicking Deploy, open **Environment Variables** and add:
 
-1. Go to [vercel.com](https://vercel.com) and sign in (or create a free account — use "Continue with GitHub")
-2. Click **Add New → Project**
-3. Find and select your `nonprofit-dashboard` repo
-4. Vercel auto-detects Vite — leave all settings as default
-5. Click **Deploy**
+   | Name | Value |
+   |---|---|
+   | `VITE_NOTION_TOKEN` | `ntn_your_token_here` |
 
-Vercel gives you a public URL like `https://nonprofit-dashboard-abc123.vercel.app` in about 60 seconds.
+4. Click **Deploy**
 
-### Step 4 — Custom domain (optional)
+Vercel injects `VITE_NOTION_TOKEN` at build time. It is never written to any file and never exposed in your git history.
 
-In your Vercel project settings → Domains, you can add a custom domain like `dashboard.yourorg.org`.
+### Update the token later
+
+Vercel Dashboard → your project → **Settings → Environment Variables** → edit `VITE_NOTION_TOKEN` → redeploy.
 
 ---
 
 ## Auto-deploy on push
 
-After initial setup, every `git push` to `main` automatically redeploys. Your workflow becomes:
+After the initial setup, every `git push` to `main` redeploys automatically in ~30 seconds.
 
 ```bash
-# Make changes to src/App.jsx
+# Make a change, then:
 git add .
-git commit -m "Update board members"
+git commit -m "Update checklist"
 git push
-# Vercel redeploys automatically in ~30 seconds
 ```
 
 ---
@@ -82,39 +107,31 @@ git push
 
 ```
 nonprofit-dashboard/
-├── index.html          # Entry HTML (loads fonts, sets viewport)
-├── vite.config.js      # Vite configuration
-├── package.json        # Dependencies
+├── .env.local.example   ← copy to .env.local for local dev
+├── .gitignore           ← .env.local and node_modules excluded
+├── index.html
+├── vite.config.js
+├── package.json
 └── src/
-    ├── main.jsx        # React root
-    └── App.jsx         # Entire dashboard (all pages, data, styles)
+    ├── main.jsx         ← React entry point
+    ├── App.jsx          ← full dashboard UI
+    ├── notion.js        ← all Notion API calls
+    └── config.js        ← reads token from import.meta.env
 ```
 
-All dashboard content lives in `src/App.jsx`. Data arrays at the top of the file are where you'll customize template content, board members, assets, and phase tasks.
-
 ---
 
-## Sections
+## How data saves
 
-| Section | Description |
+| Section | Saves to Notion when... |
 |---|---|
-| Overview | Org profile, stats, phase progress summary |
-| Formation | 7-phase 501(c)(3) formation checklist |
-| Consider | Legal, financial, governance, and program considerations |
-| Board | Board member directory with photo upload |
-| Impact Report | Annual report structure and PDF upload |
-| Financials | Budget, revenue, compliance timeline, required documents |
-| Assets | Link library with categories and descriptions |
-| Weekly Log | Release-notes-style weekly activity entries |
+| Org profile fields | 1.2 seconds after you stop typing |
+| Checklist checkboxes | Immediately on toggle |
+| Assets | On clicking "Save to Notion" |
+| Weekly log entries | On clicking "Save to Notion" |
+
+A floating **Saved to Notion ✓** badge confirms every successful write.
 
 ---
 
-## Mobile
-
-The app is fully responsive:
-- **Desktop**: Sidebar navigation on the left
-- **Mobile**: Bottom tab bar with a "More" overflow menu for sections 6–8
-
----
-
-*Built with React 18 + Vite 5. No external UI libraries required.*
+*Built with React 18 + Vite 5. No external UI libraries.*
