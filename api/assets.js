@@ -1,12 +1,12 @@
-// api/assets.js — GET lists, POST creates, DELETE archives
-import { notionQuery, notionCreate, notionArchive, getProp, DB, json, err, cors } from "./_notion.js";
+const { send, sendErr, notionFetch, getProp, DB, CORS } = require("./_notion");
 
-export default async function handler(req) {
-  if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
+module.exports = async function handler(req, res) {
+  Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     if (req.method === "GET") {
-      const data = await notionQuery(DB.ASSETS);
+      const data = await notionFetch(`/databases/${DB.ASSETS}/query`, "POST", {});
       const assets = data.results.map(page => ({
         pageId:   page.id,
         title:    getProp(page, "Title") ?? "",
@@ -14,33 +14,33 @@ export default async function handler(req) {
         category: getProp(page, "Category") ?? "Other",
         desc:     getProp(page, "Description") ?? "",
       }));
-      return json(assets);
+      return send(res, assets);
     }
 
     if (req.method === "POST") {
-      const { title, url, category, desc } = await req.json();
-      if (!title || !url) return err("title and url are required", 400);
-
-      const page = await notionCreate(DB.ASSETS, {
-        "Title":       { title: [{ text: { content: title } }] },
-        "URL":         { url },
-        "Category":    { select: { name: category ?? "Other" } },
-        "Description": { rich_text: [{ text: { content: desc ?? "" } }] },
+      const { title, url, category, desc } = req.body;
+      if (!title || !url) return sendErr(res, "title and url are required", 400);
+      const page = await notionFetch("/pages", "POST", {
+        parent: { database_id: DB.ASSETS },
+        properties: {
+          "Title":       { title: [{ text: { content: title } }] },
+          "URL":         { url },
+          "Category":    { select: { name: category ?? "Other" } },
+          "Description": { rich_text: [{ text: { content: desc ?? "" } }] },
+        },
       });
-      return json({ ok: true, pageId: page.id });
+      return send(res, { ok: true, pageId: page.id });
     }
 
     if (req.method === "DELETE") {
-      const { pageId } = await req.json();
-      if (!pageId) return err("pageId is required", 400);
-      await notionArchive(pageId);
-      return json({ ok: true });
+      const { pageId } = req.body;
+      if (!pageId) return sendErr(res, "pageId is required", 400);
+      await notionFetch(`/pages/${pageId}`, "PATCH", { archived: true });
+      return send(res, { ok: true });
     }
 
-    return err("Method not allowed", 405);
+    sendErr(res, "Method not allowed", 405);
   } catch (e) {
-    return err(e.message);
+    sendErr(res, e.message);
   }
-}
-
-export const config = { runtime: "edge" };
+};

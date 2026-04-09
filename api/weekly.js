@@ -1,12 +1,12 @@
-// api/weekly.js — GET lists entries, POST creates one
-import { notionQuery, notionCreate, getProp, DB, json, err, cors } from "./_notion.js";
+const { send, sendErr, notionFetch, getProp, DB, CORS } = require("./_notion");
 
-export default async function handler(req) {
-  if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
+module.exports = async function handler(req, res) {
+  Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     if (req.method === "GET") {
-      const data = await notionQuery(DB.WEEKLY_LOG);
+      const data = await notionFetch(`/databases/${DB.WEEKLY_LOG}/query`, "POST", {});
       const entries = data.results
         .map(page => ({
           pageId:   page.id,
@@ -19,31 +19,30 @@ export default async function handler(req) {
           next:     getProp(page, "Next Steps") ?? "",
         }))
         .sort((a, b) => b.label.localeCompare(a.label));
-      return json(entries);
+      return send(res, entries);
     }
 
     if (req.method === "POST") {
-      const { label, phase, summary, done, wip, blockers, next } = await req.json();
-      if (!label) return err("label is required", 400);
-
-      const rt = (val) => ({ rich_text: [{ text: { content: val ?? "" } }] });
-
-      const page = await notionCreate(DB.WEEKLY_LOG, {
-        "Week":             { title: [{ text: { content: label } }] },
-        "Phase":            { select: { name: phase ?? "Multiple" } },
-        "Summary":          rt(summary),
-        "Actions Completed":rt(done),
-        "In Progress":      rt(wip),
-        "Blockers":         rt(blockers),
-        "Next Steps":       rt(next),
+      const { label, phase, summary, done, wip, blockers, next } = req.body;
+      if (!label) return sendErr(res, "label is required", 400);
+      const rt = v => ({ rich_text: [{ text: { content: v ?? "" } }] });
+      const page = await notionFetch("/pages", "POST", {
+        parent: { database_id: DB.WEEKLY_LOG },
+        properties: {
+          "Week":              { title: [{ text: { content: label } }] },
+          "Phase":             { select: { name: phase ?? "Multiple" } },
+          "Summary":           rt(summary),
+          "Actions Completed": rt(done),
+          "In Progress":       rt(wip),
+          "Blockers":          rt(blockers),
+          "Next Steps":        rt(next),
+        },
       });
-      return json({ ok: true, pageId: page.id });
+      return send(res, { ok: true, pageId: page.id });
     }
 
-    return err("Method not allowed", 405);
+    sendErr(res, "Method not allowed", 405);
   } catch (e) {
-    return err(e.message);
+    sendErr(res, e.message);
   }
-}
-
-export const config = { runtime: "edge" };
+};

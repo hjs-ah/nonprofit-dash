@@ -1,43 +1,44 @@
-// api/org.js — GET loads profile, POST saves a single field
-import { notionQuery, notionCreate, notionUpdate, getProp, DB, json, err, cors } from "./_notion.js";
+const { send, sendErr, notionFetch, getProp, DB, CORS } = require("./_notion");
 
-export default async function handler(req) {
-  if (req.method === "OPTIONS") return new Response(null, { headers: cors() });
+module.exports = async function handler(req, res) {
+  Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     if (req.method === "GET") {
-      const data = await notionQuery(DB.ORG_PROFILE);
+      const data = await notionFetch(`/databases/${DB.ORG_PROFILE}/query`, "POST", {});
       const result = {};
       for (const page of data.results) {
         const field = getProp(page, "Field");
         const value = getProp(page, "Value");
         if (field) result[field] = { value: value ?? "", pageId: page.id };
       }
-      return json(result);
+      return send(res, result);
     }
 
     if (req.method === "POST") {
-      const { field, value, pageId } = await req.json();
-      if (!field) return err("field is required", 400);
+      const { field, value, pageId } = req.body;
+      if (!field) return sendErr(res, "field is required", 400);
 
       if (pageId) {
-        await notionUpdate(pageId, {
-          "Value": { rich_text: [{ text: { content: value ?? "" } }] },
+        await notionFetch(`/pages/${pageId}`, "PATCH", {
+          properties: { "Value": { rich_text: [{ text: { content: value ?? "" } }] } },
         });
-        return json({ ok: true, pageId });
+        return send(res, { ok: true, pageId });
       } else {
-        const page = await notionCreate(DB.ORG_PROFILE, {
-          "Field": { title: [{ text: { content: field } }] },
-          "Value": { rich_text: [{ text: { content: value ?? "" } }] },
+        const page = await notionFetch("/pages", "POST", {
+          parent: { database_id: DB.ORG_PROFILE },
+          properties: {
+            "Field": { title: [{ text: { content: field } }] },
+            "Value": { rich_text: [{ text: { content: value ?? "" } }] },
+          },
         });
-        return json({ ok: true, pageId: page.id });
+        return send(res, { ok: true, pageId: page.id });
       }
     }
 
-    return err("Method not allowed", 405);
+    sendErr(res, "Method not allowed", 405);
   } catch (e) {
-    return err(e.message);
+    sendErr(res, e.message);
   }
-}
-
-export const config = { runtime: "edge" };
+};
